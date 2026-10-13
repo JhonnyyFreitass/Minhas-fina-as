@@ -95,6 +95,15 @@ input,select{font:inherit;color:var(--ink);background:var(--panel2);border:1px s
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
 .toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#111;color:#fff;border:1px solid var(--acc);padding:10px 16px;border-radius:12px;z-index:50;max-width:90vw;box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .scroll-x{overflow-x:auto}
+.calc-fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:40;width:54px;height:54px;font-size:24px}
+.calc{position:fixed;right:16px;bottom:calc(82px + env(safe-area-inset-bottom,0px));z-index:45;width:min(300px,calc(100vw - 24px));background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px;box-shadow:0 14px 40px var(--shadow)}
+.calc[hidden]{display:none}
+.calc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font:600 15px 'Chakra Petch',sans-serif;cursor:grab;touch-action:none;user-select:none;padding-bottom:10px}
+.calc-disp{background:#0b0b0b;border:1px solid #000;border-radius:10px;padding:8px 12px;text-align:right;box-shadow:inset 0 3px 6px rgba(0,0,0,.8);color:#ffb066;min-height:68px}
+.calc-expr{font-size:13px;color:#b9855a;min-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.calc-cur{font-size:30px;font-weight:700;overflow-x:auto;white-space:nowrap;line-height:1.2}
+.calc-keys{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+.ck{width:100%;padding:11px 0;font-size:19px;border-radius:10px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 svg text{fill:var(--mute);font:11px 'Barlow',sans-serif}
 .cur{display:flex;flex-direction:column;gap:2px}
@@ -114,6 +123,13 @@ svg text{fill:var(--mute);font:11px 'Barlow',sans-serif}
   </header>
   <nav class="tabs" role="tablist" id="tabs"></nav>
   <main id="main"></main>
+</div>
+<button class="btn round calc-fab" id="calcFab" aria-label="Abrir calculadora" aria-expanded="false" title="Calculadora">🧮</button>
+<div id="calc" class="calc" role="dialog" aria-label="Calculadora" hidden>
+  <div class="calc-head" id="calcHead"><span>Calculadora</span><button class="btn chrome sm" id="calcClose" aria-label="Fechar calculadora">✕</button></div>
+  <div class="calc-disp"><div id="calcExpr" class="calc-expr">&nbsp;</div><div id="calcCur" class="calc-cur num">0</div></div>
+  <div class="calc-keys" id="calcKeys"></div>
+  <button class="btn sm" id="calcUse" style="width:100%;margin-top:12px">Usar no campo</button>
 </div>
 <div id="toast" class="toast" hidden></div>
 
@@ -706,6 +722,99 @@ document.addEventListener("submit",function(ev){
 });
 $("#themeBtn").addEventListener("click",function(){S.theme=S.theme==="dark"?"light":"dark";applyTheme();save();});
 
+/* ---------- calculadora flutuante ---------- */
+var calcEl=$("#calc"),calcFab=$("#calcFab"),calcHead=$("#calcHead"),lastIn=null,calcDrag=null;
+var CS={acc:null,op:null,cur:"0",fresh:true,pct:false,expr:""};
+function cReset(){CS={acc:null,op:null,cur:"0",fresh:true,pct:false,expr:""};}
+function cnum(){var n=parseFloat(String(CS.cur).replace(",","."));return isFinite(n)?n:0;}
+function fRaw(n){if(!isFinite(n))return "Erro";var t=String(+n.toFixed(10));if(t.indexOf("e")>-1)t=n.toExponential(6);return t.replace(".",",");}
+function fDisp(n){return isFinite(n)?n.toLocaleString("pt-BR",{maximumFractionDigits:10}):"Erro";}
+function fShow(c){
+  if(c==="Erro")return c;
+  var neg=c.charAt(0)==="-",b=neg?c.slice(1):c,pr=b.split(","),ip=pr[0];
+  var i=(ip.length>15||ip.indexOf("e")>-1)?ip:Number(ip).toLocaleString("pt-BR",{maximumFractionDigits:0});
+  return (neg?"-":"")+i+(pr.length>1?","+pr[1]:"");
+}
+function cShow(){$("#calcExpr").textContent=CS.expr||"\u00a0";$("#calcCur").textContent=fShow(CS.cur);}
+function cCompute(a,o,b){if(o==="+")return a+b;if(o==="−")return a-b;if(o==="×")return a*b;if(o==="÷")return b===0?NaN:a/b;return b;}
+function cKey(k){
+  if(CS.cur==="Erro"){
+    if(k==="C"||k==="⌫"){cReset();cShow();return;}
+    if(!/^[0-9,]$/.test(k))return;
+    CS.cur="0";CS.fresh=true;CS.acc=null;CS.op=null;
+  }
+  if(/^[0-9]$/.test(k)){
+    if(CS.fresh||CS.pct){CS.cur=k;CS.fresh=false;CS.pct=false;}
+    else if(CS.cur.replace(/[-,]/g,"").length<14)CS.cur=CS.cur==="0"?k:(CS.cur==="-0"?"-"+k:CS.cur+k);
+  }else if(k===","){
+    if(CS.fresh||CS.pct){CS.cur="0,";CS.fresh=false;CS.pct=false;}
+    else if(CS.cur.indexOf(",")<0)CS.cur+=",";
+  }else if(k==="⌫"){
+    if(!CS.fresh&&!CS.pct){CS.cur=CS.cur.slice(0,-1);if(CS.cur===""||CS.cur==="-")CS.cur="0";}
+  }else if(k==="C"){cReset();
+  }else if(k==="±"){
+    if(CS.cur!=="0"&&CS.cur!=="0,")CS.cur=CS.cur.charAt(0)==="-"?CS.cur.slice(1):"-"+CS.cur;
+  }else if(k==="%"){
+    var pn=cnum();pn=(CS.op&&CS.acc!==null)?CS.acc*pn/100:pn/100;
+    CS.cur=fRaw(pn);CS.fresh=false;CS.pct=true;
+  }else if(k==="="){
+    if(CS.op){
+      var a=CS.acc,b=cnum(),r=cCompute(a,CS.op,b);
+      CS.expr=fDisp(a)+" "+CS.op+" "+fDisp(b)+" =";CS.cur=fRaw(r);CS.acc=null;CS.op=null;CS.fresh=true;CS.pct=false;
+    }
+  }else{
+    var n2=cnum();
+    if(CS.op&&!CS.fresh){var r2=cCompute(CS.acc,CS.op,n2);CS.acc=r2;CS.cur=fRaw(r2);}
+    else if(!CS.op){CS.acc=n2;}
+    CS.op=k;CS.fresh=true;CS.pct=false;CS.expr=fDisp(CS.acc)+" "+k;
+    if(!isFinite(CS.acc)){CS.cur="Erro";CS.acc=null;CS.op=null;CS.expr="";}
+  }
+  cShow();
+}
+function cUse(){
+  var el=lastIn;
+  if(!el||!document.contains(el)||el.disabled){toast("Toque antes em um campo de valor (R$) e depois em Usar no campo.");return;}
+  if(CS.cur==="Erro")return;
+  el.value=fRaw(Math.round(cnum()*100)/100);
+  el.dispatchEvent(new Event("input",{bubbles:true}));
+  el.focus();toast("Valor colocado no campo.");
+}
+function initCalc(){
+  var L=[["C","c","Limpar"],["⌫","c","Apagar"],["%","c","Porcentagem"],["÷","o","Dividir"],["7","d"],["8","d"],["9","d"],["×","o","Multiplicar"],["4","d"],["5","d"],["6","d"],["−","o","Subtrair"],["1","d"],["2","d"],["3","d"],["+","o","Somar"],["±","c","Inverter sinal"],["0","d"],[",","d","Vírgula"],["=","o","Resultado"]];
+  var cls={c:"btn chrome ck",o:"btn ck",d:"btn steel ck"};
+  $("#calcKeys").innerHTML=L.map(function(x){return '<button class="'+cls[x[1]]+'" data-k="'+x[0]+'"'+(x[2]?' aria-label="'+x[2]+'"':'')+'>'+x[0]+'</button>';}).join("");
+  $("#calcKeys").addEventListener("click",function(e){var b=e.target.closest("[data-k]");if(b)cKey(b.dataset.k);});
+  $("#calcUse").addEventListener("click",cUse);
+  function toggle(open){calcEl.hidden=!open;calcFab.setAttribute("aria-expanded",String(open));}
+  calcFab.addEventListener("click",function(){toggle(calcEl.hidden);});
+  $("#calcClose").addEventListener("click",function(){toggle(false);});
+  document.addEventListener("focusin",function(e){var t=e.target;if(t&&t.tagName==="INPUT"&&t.getAttribute("inputmode")==="decimal")lastIn=t;});
+  document.addEventListener("keydown",function(e){
+    if(calcEl.hidden)return;
+    var tg=e.target;if(tg&&/^(INPUT|SELECT|TEXTAREA)$/.test(tg.tagName))return;
+    if(e.ctrlKey||e.metaKey||e.altKey)return;
+    if(e.key==="Escape"){toggle(false);return;}
+    var map={"*":"×","/":"÷","-":"−","Enter":"=","Backspace":"⌫",".":",","Delete":"C"},m=map[e.key]||e.key;
+    if(/^[0-9]$/.test(m)||["+","−","×","÷","=","⌫",",","%","C"].indexOf(m)>-1){e.preventDefault();cKey(m);}
+  });
+  calcHead.addEventListener("pointerdown",function(e){
+    if(e.target.closest("button"))return;
+    var r=calcEl.getBoundingClientRect();
+    calcDrag={dx:e.clientX-r.left,dy:e.clientY-r.top};
+    calcEl.style.left=r.left+"px";calcEl.style.top=r.top+"px";calcEl.style.right="auto";calcEl.style.bottom="auto";
+    try{calcHead.setPointerCapture(e.pointerId);}catch(x){}
+  });
+  calcHead.addEventListener("pointermove",function(e){
+    if(!calcDrag)return;
+    var x=Math.min(Math.max(0,e.clientX-calcDrag.dx),window.innerWidth-calcEl.offsetWidth);
+    var y=Math.min(Math.max(0,e.clientY-calcDrag.dy),window.innerHeight-calcEl.offsetHeight);
+    calcEl.style.left=x+"px";calcEl.style.top=y+"px";
+  });
+  calcHead.addEventListener("pointerup",function(){calcDrag=null;});
+  calcHead.addEventListener("pointercancel",function(){calcDrag=null;});
+  cShow();
+}
+initCalc();
 load();if(applyRecurring())save();applyTheme();render();connectDb();connectSample();
 })();
 </script>
