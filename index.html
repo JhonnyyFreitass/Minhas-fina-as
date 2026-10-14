@@ -125,7 +125,7 @@ svg text{fill:var(--mute);font:11px 'Barlow',sans-serif}
       <div class="logo" aria-hidden="true">$</div>
       <div><h1>Finanças Forja</h1><div class="sub" id="saveState">Seus dados ficam salvos neste app</div></div>
     </div>
-    <div class="row"><button class="btn steel round" id="lockBtn" aria-label="Senha e segurança" title="Senha e segurança">🔒</button><button class="btn steel round" id="themeBtn" aria-label="Alternar modo escuro e claro" title="Modo escuro / claro">☾</button></div>
+    <div class="row"><button class="btn steel round" id="bkBtn" aria-label="Backup" title="Backup dos dados">💾</button><button class="btn steel round" id="lockBtn" aria-label="Senha e segurança" title="Senha e segurança">🔒</button><button class="btn steel round" id="themeBtn" aria-label="Alternar modo escuro e claro" title="Modo escuro / claro">☾</button></div>
   </header>
   <nav class="tabs" role="tablist" id="tabs"></nav>
   <main id="main"></main>
@@ -151,6 +151,22 @@ svg text{fill:var(--mute);font:11px 'Barlow',sans-serif}
     <p class="sub" style="margin:0">A senha impede que outras pessoas abram o app neste aparelho. Ela não criptografa os dados guardados no navegador.</p>
   </div>
 </div>
+<div id="bk" class="lock sec" hidden role="dialog" aria-modal="true" aria-label="Backup">
+  <div class="lock-card">
+    <div class="row between"><h2 style="margin:0">Backup</h2><button class="btn chrome sm" id="bkClose" aria-label="Fechar">✕</button></div>
+    <p class="sub" id="bkLast" style="margin:0"></p>
+    <button class="btn" id="bkExport">Baixar backup</button>
+    <p class="sub" style="margin:0">Salva todos os seus dados em um arquivo no aparelho. Guarde o arquivo em um lugar seguro (nuvem, e-mail, pendrive).</p>
+    <button class="btn steel" id="bkPick">Restaurar de um arquivo</button>
+    <input type="file" id="bkFile" accept=".json,application/json" hidden>
+    <div id="bkConfirm" hidden style="display:none;flex-direction:column;gap:10px">
+      <p id="bkInfo" style="margin:0"></p>
+      <div class="row"><button class="btn chrome sm" id="bkYes">Substituir meus dados</button><button class="btn steel sm" id="bkNo">Cancelar</button></div>
+    </div>
+    <p class="sub" id="bkMsg" role="alert" style="margin:0"></p>
+    <p class="sub" style="margin:0">Restaurar substitui os dados atuais pelos do arquivo. Se o backup tiver senha, ela volta junto.</p>
+  </div>
+</div>
 <button class="btn round calc-fab" id="calcFab" aria-label="Abrir calculadora" aria-expanded="false" title="Calculadora">🧮</button>
 <div id="calc" class="calc" role="dialog" aria-label="Calculadora" hidden>
   <div class="calc-head" id="calcHead"><span>Calculadora</span><button class="btn chrome sm" id="calcClose" aria-label="Fechar calculadora">✕</button></div>
@@ -163,14 +179,14 @@ svg text{fill:var(--mute);font:11px 'Barlow',sans-serif}
 <script>
 (function(){
 "use strict";
-var CATS=["Moradia","Condomínio","Luz","Água","Alimentação","Transporte","Lazer","Saúde","Educação","Compras","Outros"];
+var CATS=["Moradia","Condomínio","Luz","Água","Empresa","Internet","Telefone","Alimentação","Transporte","Lazer","Saúde","Educação","Compras","Outros"];
 var INCOME_CATS=["Salário","Extra","Investimentos","Outros"];
 var PALETTE=["#ff6a00","#ffa040","#ffd08a","#b33f00","#8d9298","#c8ccd0","#5c3a22","#e9e9e9"];
 var CURS=[["USD","Dólar americano"],["EUR","Euro"],["CLP","Peso chileno"],["CAD","Dólar canadense"],["AUD","Dólar australiano"]];
 var TABS=[["painel","Painel"],["lanc","Lançamentos"],["dividas","Dívidas fixas"],["cofre","Cofrinho e moedas"],["orc","Orçamento"],["rec","Recorrentes"],["metas","Metas"],["ia","IA financeira"]];
 var TYPES={viagem:"✈️ Viagem",casa:"🏠 Casa",outro:"🎯 Outra meta"};
 
-function def(){return{tx:[],debts:[],pots:[],goals:[],meta:0,budgets:{},recur:[],reserveMonths:6,reservePot:"",
+function def(){return{tx:[],debts:[],recv:[],pots:[],goals:[],meta:0,budgets:{},recur:[],reserveMonths:6,reservePot:"",
   rates:{USD:5.18,EUR:5.93,CLP:0.0056,CAD:3.67,AUD:3.60,date:"2026-10-13",approx:true},
   theme:"dark",updatedAt:0};}
 var S=def(), tab="painel", cur=ym(new Date()), editRates=false;
@@ -250,6 +266,13 @@ function level(st){
   if(st.ratio<=.8)return{t:"Atenção",c:"warn"};
   return{t:"Crítico",c:"neg"};
 }
+function recvInfo(r){
+  var parc=r.n>0?r.total/r.n:r.total,rest=Math.max(0,r.total-r.rec);
+  var left=parc>0?Math.ceil(rest/parc-1e-9):0;
+  left=Math.min(r.n,Math.max(0,left));
+  return{parc:parc,rest:rest,left:left,done:r.n-left,pct:r.total>0?Math.min(100,r.rec/r.total*100):0};
+}
+function totalReceber(){return (S.recv||[]).reduce(function(a,r){return a+recvInfo(r).rest;},0);}
 function potBal(p){return p.hist.reduce(function(a,h){return a+h.v;},0);}
 function totalSaved(){return S.pots.reduce(function(a,p){return a+potBal(p);},0);}
 function brlPer(c){return S.rates[c]||1;}
@@ -326,7 +349,8 @@ function vPainel(){
   h+='<div class="card"><h2>Resumo geral</h2>'+
      '<div class="item"><span>Guardado no total</span><b class="num acc">'+brl(saved)+'</b></div><div class="list">'+
      '<div class="item"><span>Dívidas fixas pagas</span><b>'+brl(st.fixedPaid)+' de '+brl(st.fixed)+'</b></div>'+
-     '<div class="item"><span>Metas ativas</span><b>'+S.goals.length+'</b></div></div></div>';
+     '<div class="item"><span>Metas ativas</span><b>'+S.goals.length+'</b></div>'+
+     '<div class="item"><span>A receber (parcelas)</span><b class="pos">'+brl(totalReceber())+'</b></div></div></div>';
   h+='</div>';
   h+=dueAlerts()+vProj(st)+budgetAlerts(st);
   h+='<div class="grid g2" style="margin-top:14px"><div class="card"><h2>Desempenho dos últimos 6 meses</h2><div class="scroll-x">'+barChart(list)+'</div></div>';
@@ -353,6 +377,14 @@ function editDebt(d){
     '<div class="field"><label for="edd">Vence no dia</label><input id="edd" name="day" type="number" min="1" max="31" value="'+d.day+'"></div>'+
     '<div class="field"><label for="eds">Começa em</label><input id="eds" name="start" type="month" value="'+esc(d.start)+'" required></div>'+
     '<div class="field"><label for="edp">Parcelas</label><input id="edp" name="n" type="number" min="0" value="'+(d.n||"")+'" placeholder="Sem fim"></div>'+
+    editBtns()+'</div></form></div>';
+}
+function editRecv(r){
+  return '<div class="item" style="flex-direction:column;align-items:stretch"><form data-form="recvedit" data-id="'+r.id+'"><div class="row">'+
+    '<div class="field" style="flex:2 1 160px"><label for="erw">Quem deve / trabalho</label><input id="erw" name="who" value="'+esc(r.who)+'" required></div>'+
+    '<div class="field"><label for="ert">Valor total (R$)</label><input id="ert" name="total" inputmode="decimal" value="'+fv(r.total)+'" required></div>'+
+    '<div class="field"><label for="ern">Nº de parcelas</label><input id="ern" name="n" type="number" min="1" value="'+r.n+'" required></div>'+
+    '<div class="field"><label for="err">Já recebido (R$)</label><input id="err" name="rec" inputmode="decimal" value="'+fv(r.rec)+'"></div>'+
     editBtns()+'</div></form></div>';
 }
 function editGoal(g){
@@ -483,6 +515,29 @@ function vRec(){
 }
 function kpi(l,v,c){return '<div class="card kpi"><div class="lbl">'+l+'</div><div class="val '+c+'">'+v+'</div></div>';}
 
+function vReceber(){
+  var list=S.recv||[];
+  var h='<div class="card" style="margin-top:14px"><h2>Parcelas a receber</h2>'+
+   '<p class="sub" style="margin:0 0 10px">Para trabalhos em que alguém vai pagar parcelado. Informe o total, o número de parcelas e quanto já foi pago: o app calcula as parcelas que faltam.</p>'+
+   '<form data-form="recv"><div class="row">'+
+   '<div class="field" style="flex:2 1 160px"><label for="rw">Quem deve / trabalho</label><input id="rw" name="who" required placeholder="Ex.: João, site da loja"></div>'+
+   '<div class="field"><label for="rt2">Valor total (R$)</label><input id="rt2" name="total" inputmode="decimal" required placeholder="12000,00"></div>'+
+   '<div class="field"><label for="rn">Nº de parcelas</label><input id="rn" name="n" type="number" min="1" required placeholder="30"></div>'+
+   '<div class="field"><label for="rr">Já recebido (R$)</label><input id="rr" name="rec" inputmode="decimal" placeholder="0,00"></div>'+
+   '<button class="btn" type="submit" style="align-self:flex-end">Adicionar</button></div></form>';
+  if(!list.length)return h+'<div class="empty" style="margin-top:12px">Nenhuma parcela a receber cadastrada.</div></div>';
+  h+='<div class="sub" style="margin-top:12px">Total ainda a receber: <b class="pos num">'+brl(totalReceber())+'</b></div><div class="list">'+list.map(function(r){
+    if(isEd("recv",r.id))return editRecv(r);
+    var i=recvInfo(r),fim=i.left===0;
+    return '<div class="item" style="flex-direction:column;align-items:stretch"><div class="row between"><div><div class="t">'+esc(r.who)+'</div><div class="s">'+r.n+' parcelas de '+brl(i.parc)+' · total '+brl(r.total)+'</div></div>'+
+      '<div class="row"><button class="btn steel sm" data-act="edit" data-kind="recv" data-id="'+r.id+'">Editar</button><button class="btn chrome sm" data-act="delrecv" data-id="'+r.id+'" aria-label="Excluir">✕</button></div></div>'+
+      '<div class="row between" style="margin-top:8px"><b class="num '+(fim?'pos':'warn')+'">'+(fim?'Quitado! 🎉':'Faltam '+i.left+(i.left===1?' parcela':' parcelas'))+'</b><span class="sub">'+i.done+' de '+r.n+' pagas</span></div>'+
+      '<div class="bar" style="margin-top:6px"><i style="width:'+i.pct+'%"></i></div>'+
+      '<div class="row between sub" style="margin-top:6px"><span>Recebido '+brl(r.rec)+'</span><span>Falta receber '+brl(i.rest)+'</span></div>'+
+      (fim?'':'<form data-form="rmove" data-id="'+r.id+'" class="row" style="margin-top:8px"><div class="field"><label class="sr">Valor</label><input name="v" inputmode="decimal" placeholder="'+fv(Math.round(Math.min(i.parc,i.rest)*100)/100)+' (1 parcela)" aria-label="Valor recebido"></div><button class="btn sm" type="submit">Receber parcela</button></form>')+'</div>';
+  }).join("")+'</div></div>';
+  return h;
+}
 function vLanc(){
   var h=monthNav();
   h+='<div class="card"><h2>Novo lançamento</h2><form data-form="tx"><div class="row">'+
@@ -491,6 +546,7 @@ function vLanc(){
    '<div class="field"><label for="tv">Valor (R$)</label><input id="tv" name="v" inputmode="decimal" required placeholder="0,00"></div>'+
    '<div class="field"><label for="tdt">Data</label><input id="tdt" name="d" type="date" value="'+today()+'" required></div>'+
    '<button class="btn" type="submit" style="align-self:flex-end">Adicionar</button></div></form></div>';
+  h+=vReceber();
   var items=S.tx.filter(function(t){return t.d.slice(0,7)===cur;}).sort(function(a,b){return a.d<b.d?1:-1;});
   h+='<div class="card" style="margin-top:14px"><h2>Movimentações do mês</h2>';
   if(!items.length)h+='<div class="empty">Nada lançado neste mês. Adicione sua primeira entrada ou saída acima.</div>';
@@ -679,6 +735,7 @@ document.addEventListener("click",function(ev){
   else if(a==="canceledit"){editing=null;render();}
   else if(a==="paidnow"){S.debts.forEach(function(d){if(d.id===id){d.paid=d.paid||{};d.paid[t.dataset.m]=true;}});save();render();}
   else if(a==="delbudget"){delete S.budgets[id];save();render();}
+  else if(a==="delrecv"){S.recv=S.recv.filter(function(x){return x.id!==id;});save();render();}
   else if(a==="delrec"){S.recur=S.recur.filter(function(x){return x.id!==id;});save();render();}
   else if(a==="editrates"){editRates=!editRates;render();}
   else if(a==="refresh"){refreshRates();}
@@ -692,6 +749,24 @@ document.addEventListener("submit",function(ev){
     var v=num(g("v"));if(v<=0)return toast("Digite um valor maior que zero.");
     S.tx.push({id:uid(),type:g("type"),desc:String(g("desc")).trim(),v:v,cat:g("type")==="in"?"Entrada":"Outros",d:g("d")});
     if(g("d")&&g("d").slice(0,7)!==cur)cur=g("d").slice(0,7);
+  }else if(k==="recv"){
+    var rt=num(g("total")),rn=parseInt(g("n"))||0;
+    if(rt<=0||rn<1)return toast("Informe o valor total e o número de parcelas.");
+    S.recv.push({id:uid(),who:String(g("who")).trim(),total:rt,n:rn,rec:Math.min(rt,num(g("rec")))});
+    toast("Parcelas cadastradas.");
+  }else if(k==="recvedit"){
+    var er=S.recv.filter(function(x){return x.id===f.dataset.id;})[0],ert=num(g("total")),ern=parseInt(g("n"))||0;
+    if(!er)return;if(ert<=0||ern<1)return toast("Informe o valor total e o número de parcelas.");
+    er.who=String(g("who")).trim();er.total=ert;er.n=ern;er.rec=Math.min(ert,num(g("rec")));
+    editing=null;toast("Parcelas atualizadas.");
+  }else if(k==="rmove"){
+    var rr=S.recv.filter(function(x){return x.id===f.dataset.id;})[0];if(!rr)return;
+    var ri=recvInfo(rr),ra=num(g("v"));if(ra<=0)ra=ri.parc;
+    ra=Math.round(Math.min(ra,ri.rest)*100)/100;
+    if(ra<=0)return toast("Esta cobrança já está quitada.");
+    rr.rec=Math.round((rr.rec+ra)*100)/100;
+    S.tx.push({id:uid(),type:"in",desc:"Parcela recebida — "+rr.who,v:ra,cat:"Entrada",d:today()});
+    cur=ym(new Date());toast("Recebido "+brl(ra)+" e lançado como entrada.");
   }else if(k==="debt"){
     var dv=num(g("v"));if(dv<=0)return toast("Digite o valor mensal da dívida.");
     S.debts.push({id:uid(),name:String(g("name")).trim(),cat:g("cat")||"Moradia",v:dv,day:Math.min(31,Math.max(1,parseInt(g("day"))||1)),start:g("start"),n:parseInt(g("n"))||0,paid:{}});
@@ -924,6 +999,53 @@ function initSec(){
   });
 }
 initSec();
+/* ---------- backup ---------- */
+var bkPending=null;
+function bkLastTxt(){
+  var t=S.lastBackup;
+  $("#bkLast").textContent=t?"Último backup baixado em "+new Date(t).toLocaleString("pt-BR")+".":"Você ainda não baixou nenhum backup.";
+}
+function bkReset(){bkPending=null;$("#bkConfirm").style.display="none";$("#bkFile").value="";}
+function bkClose(){$("#bk").hidden=true;bkReset();}
+function initBk(){
+  $("#bkBtn").addEventListener("click",function(){bkReset();$("#bkMsg").textContent="";bkLastTxt();$("#bk").hidden=false;});
+  $("#bkClose").addEventListener("click",bkClose);
+  $("#bk").addEventListener("click",function(e){if(e.target===$("#bk"))bkClose();});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!$("#bk").hidden)bkClose();});
+  $("#bkExport").addEventListener("click",function(){
+    try{
+      S.lastBackup=Date.now();save();
+      var data=JSON.stringify({app:"financas-forja",version:1,exportedAt:new Date().toISOString(),data:S},null,2);
+      var a=document.createElement("a"),url=URL.createObjectURL(new Blob([data],{type:"application/json"}));
+      a.href=url;a.download="financas-forja-backup-"+today()+".json";document.body.appendChild(a);a.click();
+      setTimeout(function(){URL.revokeObjectURL(url);a.remove();},1000);
+      bkLastTxt();$("#bkMsg").textContent="Backup gerado. Confira se o arquivo foi baixado.";
+    }catch(x){$("#bkMsg").textContent="Não foi possível gerar o backup neste navegador.";}
+  });
+  $("#bkPick").addEventListener("click",function(){$("#bkFile").click();});
+  $("#bkFile").addEventListener("change",function(){
+    var f=this.files&&this.files[0];if(!f)return;
+    var rd=new FileReader();
+    rd.onload=function(){
+      try{
+        var o=JSON.parse(rd.result),d=o&&o.app==="financas-forja"&&o.data?o.data:o;
+        if(!d||!Array.isArray(d.tx)||!Array.isArray(d.debts))throw new Error("formato");
+        bkPending=d;
+        $("#bkInfo").textContent="Arquivo válido: "+d.tx.length+" lançamentos, "+d.debts.length+" dívidas fixas, "+(d.pots||[]).length+" cofrinhos, "+(d.goals||[]).length+" metas. Os dados atuais serão substituídos.";
+        $("#bkConfirm").style.display="flex";$("#bkMsg").textContent="";
+      }catch(x){bkReset();$("#bkMsg").textContent="Esse arquivo não parece ser um backup do Finanças Forja.";}
+    };
+    rd.onerror=function(){$("#bkMsg").textContent="Não consegui ler o arquivo.";};
+    rd.readAsText(f);
+  });
+  $("#bkNo").addEventListener("click",bkReset);
+  $("#bkYes").addEventListener("click",function(){
+    if(!bkPending)return;
+    S=Object.assign(def(),bkPending);applyRecurring();save();applyTheme();render();
+    bkReset();$("#bkMsg").textContent="Backup restaurado com sucesso.";toast("Backup restaurado.");
+  });
+}
+initBk();
 load();if(applyRecurring())save();applyTheme();render();applyLock();connectDb();connectSample();
 })();
 </script>
