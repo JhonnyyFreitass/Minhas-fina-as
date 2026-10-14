@@ -93,8 +93,14 @@ input,select{font:inherit;color:var(--ink);background:var(--panel2);border:1px s
 .msg.u{align-self:flex-end;background:linear-gradient(180deg,#ff9a3c,#e65e00);color:#190a00;border:1px solid #6e2600}
 .msg.a{align-self:flex-start;background:var(--panel2);border:1px solid var(--line)}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
-.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#111;color:#fff;border:1px solid var(--acc);padding:10px 16px;border-radius:12px;z-index:50;max-width:90vw;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#111;color:#fff;border:1px solid var(--acc);padding:10px 16px;border-radius:12px;z-index:300;max-width:90vw;box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .scroll-x{overflow-x:auto}
+.lock{position:fixed;inset:0;z-index:200;background:var(--bg);display:grid;place-items:center;padding:20px}
+.lock[hidden]{display:none}
+.lock.sec{z-index:150;background:rgba(0,0,0,.65)}
+.lock-card{width:min(380px,100%);background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 14px 40px var(--shadow);display:flex;flex-direction:column;gap:12px}
+.locked .wrap,.locked .calc,.locked .calc-fab{visibility:hidden}
+.linkbtn{background:none;border:0;color:var(--acc);text-decoration:underline;padding:4px;font:inherit;cursor:pointer;align-self:center}
 .calc-fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:40;width:54px;height:54px;font-size:24px}
 .calc{position:fixed;right:16px;bottom:calc(82px + env(safe-area-inset-bottom,0px));z-index:45;width:min(300px,calc(100vw - 24px));background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px;box-shadow:0 14px 40px var(--shadow)}
 .calc[hidden]{display:none}
@@ -119,10 +125,31 @@ svg text{fill:var(--mute);font:11px 'Barlow',sans-serif}
       <div class="logo" aria-hidden="true">$</div>
       <div><h1>Finanças Forja</h1><div class="sub" id="saveState">Seus dados ficam salvos neste app</div></div>
     </div>
-    <button class="btn steel round" id="themeBtn" aria-label="Alternar modo escuro e claro" title="Modo escuro / claro">☾</button>
+    <div class="row"><button class="btn steel round" id="lockBtn" aria-label="Senha e segurança" title="Senha e segurança">🔒</button><button class="btn steel round" id="themeBtn" aria-label="Alternar modo escuro e claro" title="Modo escuro / claro">☾</button></div>
   </header>
   <nav class="tabs" role="tablist" id="tabs"></nav>
   <main id="main"></main>
+</div>
+<div id="lock" class="lock" hidden role="dialog" aria-modal="true" aria-labelledby="lockT">
+  <form id="lockForm" class="lock-card">
+    <div class="brand"><div class="logo" aria-hidden="true">$</div><div><h2 id="lockT" style="margin:0">Finanças Forja</h2><div class="sub">Digite sua senha para abrir</div></div></div>
+    <input type="password" id="lockPw" autocomplete="current-password" aria-label="Senha" required>
+    <div id="lockErr" class="neg" role="alert"></div>
+    <button class="btn" type="submit">Entrar</button>
+    <button class="linkbtn" type="button" id="lockForgot">Esqueci a senha</button>
+    <div id="forgotBox" hidden>
+      <p class="sub" style="margin:0 0 10px">Sem a senha, a única saída é apagar <b>todos os dados</b> do app (neste aparelho e na sua conta, se você usa pelo claude.ai) e começar do zero.</p>
+      <div class="row"><button class="btn chrome sm" type="button" id="wipeYes">Apagar tudo e recomeçar</button><button class="btn steel sm" type="button" id="wipeNo">Cancelar</button></div>
+    </div>
+  </form>
+</div>
+<div id="sec" class="lock sec" hidden role="dialog" aria-modal="true" aria-label="Senha e segurança">
+  <div class="lock-card">
+    <div class="row between"><h2 style="margin:0">Senha e segurança</h2><button class="btn chrome sm" id="secClose" aria-label="Fechar">✕</button></div>
+    <div id="secBody" style="display:flex;flex-direction:column;gap:10px"></div>
+    <p class="sub" id="secMsg" role="alert" style="margin:0"></p>
+    <p class="sub" style="margin:0">A senha impede que outras pessoas abram o app neste aparelho. Ela não criptografa os dados guardados no navegador.</p>
+  </div>
 </div>
 <button class="btn round calc-fab" id="calcFab" aria-label="Abrir calculadora" aria-expanded="false" title="Calculadora">🧮</button>
 <div id="calc" class="calc" role="dialog" aria-label="Calculadora" hidden>
@@ -185,7 +212,7 @@ async function connectDb(){
     if(snap.exists){
       var d=snap.data();
       if(d&&d.json&&(d.updatedAt||0)>(S.updatedAt||0)){
-        try{S=Object.assign(def(),JSON.parse(d.json));if(applyRecurring())save();applyTheme();render();}catch(e){}
+        try{S=Object.assign(def(),JSON.parse(d.json));if(applyRecurring())save();applyTheme();applyLock();render();}catch(e){}
       }
     }
     setSaveText("Salvo na sua conta");
@@ -815,7 +842,89 @@ function initCalc(){
   cShow();
 }
 initCalc();
-load();if(applyRecurring())save();applyTheme();render();connectDb();connectSample();
+/* ---------- senha ---------- */
+var unlocked=false,secMode="menu",fails=0,lockUntil=0;
+function b64(buf){var a=new Uint8Array(buf),t="";for(var i=0;i<a.length;i++)t+=String.fromCharCode(a[i]);return btoa(t);}
+function unb64(t){var x=atob(t),a=new Uint8Array(x.length);for(var i=0;i<x.length;i++)a[i]=x.charCodeAt(i);return a;}
+function canCrypto(){return !!(window.crypto&&window.crypto.subtle&&window.crypto.getRandomValues);}
+async function pwHash(pw,saltB64,iter){
+  var enc=new TextEncoder(),key=await crypto.subtle.importKey("raw",enc.encode(pw),"PBKDF2",false,["deriveBits"]);
+  var bits=await crypto.subtle.deriveBits({name:"PBKDF2",salt:unb64(saltB64),iterations:iter,hash:"SHA-256"},key,256);
+  return b64(bits);
+}
+async function pwMake(pw){var salt=b64(crypto.getRandomValues(new Uint8Array(16))),it=150000;return{s:salt,i:it,h:await pwHash(pw,salt,it)};}
+async function pwCheck(pw){return !!S.pwd&&(await pwHash(pw,S.pwd.s,S.pwd.i))===S.pwd.h;}
+function needLock(){return !!S.pwd&&!unlocked;}
+function showForgot(on){$("#forgotBox").hidden=!on;}
+function applyLock(){
+  var on=needLock();
+  document.body.classList.toggle("locked",on);
+  $("#lock").hidden=!on;
+  if(on){calcEl.hidden=true;$("#sec").hidden=true;$("#lockErr").textContent="";$("#lockPw").value="";showForgot(false);setTimeout(function(){$("#lockPw").focus();},50);}
+}
+function pwField(id,name,label,ac){return '<div class="field"><label for="'+id+'">'+label+'</label><input id="'+id+'" name="'+name+'" type="password" autocomplete="'+ac+'" required></div>';}
+function pwForm(mode,btn){
+  var f=(mode!=="new"?pwField("secCur","cur","Senha atual","current-password"):"")+(mode!=="remove"?pwField("secNew","nw","Nova senha (mínimo 4 caracteres)","new-password")+pwField("secRep","rp","Repetir nova senha","new-password"):"");
+  return '<form id="secForm" data-mode="'+mode+'" style="display:flex;flex-direction:column;gap:10px">'+f+'<div class="row"><button class="btn" type="submit">'+btn+'</button>'+(S.pwd?'<button class="btn steel" type="button" data-sec="menu">Voltar</button>':'')+'</div></form>';
+}
+function secRender(){
+  var h;
+  if(!canCrypto())h='<p style="margin:0">Este navegador não permite criar senha nesta página. Abra o app por um endereço https.</p>';
+  else if(!S.pwd)h='<p class="sub" style="margin:0">Crie uma senha para o app pedir login toda vez que for aberto.</p>'+pwForm("new","Criar senha");
+  else if(secMode==="change")h=pwForm("change","Trocar senha");
+  else if(secMode==="remove")h=pwForm("remove","Remover senha");
+  else h='<p class="sub" style="margin:0">Senha ativa. O app pede a senha toda vez que for aberto ou bloqueado.</p><button class="btn" data-sec="lock">Bloquear agora</button><button class="btn steel" data-sec="change">Trocar senha</button><button class="btn chrome" data-sec="remove">Remover senha</button>';
+  $("#secBody").innerHTML=h;$("#secMsg").textContent="";
+}
+function secClose(){$("#sec").hidden=true;}
+function initSec(){
+  $("#lockBtn").addEventListener("click",function(){
+    secMode="menu";secRender();$("#sec").hidden=false;
+    var f=$("#secBody input,#secBody button");if(f)f.focus();
+  });
+  $("#secClose").addEventListener("click",secClose);
+  $("#sec").addEventListener("click",function(e){if(e.target===$("#sec"))secClose();});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!$("#sec").hidden)secClose();});
+  $("#secBody").addEventListener("click",function(e){
+    var b=e.target.closest("[data-sec]");if(!b)return;
+    var a=b.dataset.sec;
+    if(a==="lock"){unlocked=false;secClose();applyLock();}
+    else{secMode=a;secRender();var f=$("#secBody input");if(f)f.focus();}
+  });
+  $("#secBody").addEventListener("submit",async function(e){
+    e.preventDefault();
+    var f=e.target,mode=f.dataset.mode,msg=$("#secMsg"),el=f.elements;
+    var cur=el.cur?el.cur.value:"",nw=el.nw?el.nw.value:"",rp=el.rp?el.rp.value:"";
+    try{
+      if(mode!=="new"&&!(await pwCheck(cur))){msg.textContent="Senha atual incorreta.";return;}
+      if(mode==="remove"){delete S.pwd;save();secMode="menu";secRender();toast("Senha removida.");return;}
+      if(nw.length<4){msg.textContent="Use pelo menos 4 caracteres.";return;}
+      if(nw!==rp){msg.textContent="As senhas não conferem.";return;}
+      S.pwd=await pwMake(nw);unlocked=true;save();secMode="menu";secRender();
+      toast(mode==="new"?"Senha criada.":"Senha trocada.");
+    }catch(x){msg.textContent="Não foi possível salvar a senha neste navegador.";}
+  });
+  $("#lockForm").addEventListener("submit",async function(e){
+    e.preventDefault();
+    var now=Date.now(),err=$("#lockErr");
+    if(now<lockUntil){err.textContent="Aguarde "+Math.ceil((lockUntil-now)/1000)+" s para tentar de novo.";return;}
+    var ok=false;try{ok=await pwCheck($("#lockPw").value);}catch(x){}
+    if(ok){fails=0;unlocked=true;applyLock();}
+    else{
+      $("#lockPw").value="";fails++;
+      if(fails>=5){lockUntil=Date.now()+30000;fails=0;err.textContent="Muitas tentativas. Aguarde 30 s.";}
+      else err.textContent="Senha incorreta.";
+    }
+  });
+  $("#lockForgot").addEventListener("click",function(){showForgot(true);});
+  $("#wipeNo").addEventListener("click",function(){showForgot(false);});
+  $("#wipeYes").addEventListener("click",function(){
+    var th=S.theme;S=def();S.theme=th;unlocked=true;save();applyTheme();applyLock();render();
+    toast("Dados apagados e senha removida.");
+  });
+}
+initSec();
+load();if(applyRecurring())save();applyTheme();render();applyLock();connectDb();connectSample();
 })();
 </script>
 </body>
